@@ -1,0 +1,19 @@
+[Unit]
+Description=Slack CDN Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/slack-cdn-bot
+Environment=NODE_ENV=production
+Environment=PATH=/root/.nvm/versions/node/v16.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/root/.nvm/versions/node/v16.20.2/bin/node app.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=slack-cdn-bot
+
+[Install]
+WantedBy=multi-user.target 
