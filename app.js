@@ -94,6 +94,16 @@ const THANK_YOU_RESPONSES = [
 const adapter = new FileSync('db.json');
 const db = low(adapter);
 
+// Add deduplication tracking
+const recentlyProcessedFiles = new Set();
+const DEDUP_EXPIRY_MS = 60000; // Clear file IDs after 1 minute
+
+function clearFileFromDedup(fileId) {
+  setTimeout(() => {
+    recentlyProcessedFiles.delete(fileId);
+  }, DEDUP_EXPIRY_MS);
+}
+
 db.defaults({ uploads: [] }).write();
 
 const receiver = new ExpressReceiver({
@@ -242,7 +252,21 @@ app.message(async ({ message, client, ack }) => {
   try {
     await addReaction(client, message.channel, message.ts, 'loading');
 
-    const results = await Promise.allSettled(message.files.map(file => processFile(file, message, client)));
+    // Filter out already processed files
+    const newFiles = message.files.filter(file => !recentlyProcessedFiles.has(file.id));
+    
+    if (newFiles.length === 0) {
+      await removeReaction(client, message.channel, message.ts, 'loading');
+      return;
+    }
+
+    // Add files to dedup tracking
+    newFiles.forEach(file => {
+      recentlyProcessedFiles.add(file.id);
+      clearFileFromDedup(file.id);
+    });
+
+    const results = await Promise.allSettled(newFiles.map(file => processFile(file, message, client)));
 
     await removeReaction(client, message.channel, message.ts, 'loading');
 
