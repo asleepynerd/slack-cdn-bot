@@ -94,9 +94,8 @@ const THANK_YOU_RESPONSES = [
 const adapter = new FileSync('db.json');
 const db = low(adapter);
 
-// Add deduplication tracking
 const recentlyProcessedFiles = new Set();
-const DEDUP_EXPIRY_MS = 60000; // Clear file IDs after 1 minute
+const DEDUP_EXPIRY_MS = 60000;
 
 function clearFileFromDedup(fileId) {
   setTimeout(() => {
@@ -252,7 +251,6 @@ app.message(async ({ message, client, ack }) => {
   try {
     await addReaction(client, message.channel, message.ts, 'loading');
 
-    // Filter out already processed files
     const newFiles = message.files.filter(file => !recentlyProcessedFiles.has(file.id));
     
     if (newFiles.length === 0) {
@@ -260,7 +258,6 @@ app.message(async ({ message, client, ack }) => {
       return;
     }
 
-    // Add files to dedup tracking
     newFiles.forEach(file => {
       recentlyProcessedFiles.add(file.id);
       clearFileFromDedup(file.id);
