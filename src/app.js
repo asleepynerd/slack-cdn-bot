@@ -3,7 +3,8 @@ const fileUpload = require('express-fileupload');
 const { app, receiver, TARGET_CHANNEL } = require('./services/slack');
 const { handleFileUpload } = require('./handlers/fileHandler');
 const { handleMention, handleThankYou } = require('./handlers/mentionHandler');
-const { handleHomeOpened } = require('./handlers/homeHandler');
+const { handleHomeOpened, generateHomeView } = require('./handlers/homeHandler');
+const { handleCdnStats } = require('./handlers/statsHandler');
 const apiRoutes = require('./routes/api');
 const metricsRoutes = require('./routes/metrics');
 
@@ -45,10 +46,8 @@ app.event('app_home_opened', async ({ event, client }) => {
 
 app.command('/cdn-stats', async ({ command, ack, respond }) => {
   await ack();
-  const view = generateHomeView(command.user_id);
-  await respond({
-    blocks: view.blocks
-  });
+  const response = await handleCdnStats(command);
+  await respond(response);
 });
 
 (async () => {
