@@ -2,18 +2,20 @@ const express = require('express');
 const { uploadToStorage } = require('../services/storage');
 const { addUpload, getUploads, getTotalStorageUsed } = require('../services/db');
 const { uploadCounter, storageBytes } = require('../services/metrics');
+const { uploadLimiter } = require('../middleware/rateLimiter');
 const crypto = require('crypto');
 
 const router = express.Router();
 
-router.post('/upload', async (req, res) => {
+router.post('/upload', uploadLimiter, async (req, res) => {
   try {
     if (!req.files || Object.keys(req.files).length === 0) {
       return res.status(400).json({ error: 'No files were uploaded.' });
     }
 
     const file = req.files.file;
-    const { filename, key, publicUrl } = await uploadToStorage(file.data, file.name);
+    const { filename, key } = await uploadToStorage(file.data, file.name);
+    const publicUrl = `https://cdn.hack.ngo/slackcdn/${filename}`;
 
     uploadCounter.inc({ status: 'success' });
     
@@ -51,7 +53,7 @@ router.post('/upload', async (req, res) => {
   }
 });
 
-router.post('/sy-sv', async (req, res) => {
+router.post('/sy-sv', uploadLimiter, async (req, res) => {
   try {
     if (!req.files || Object.keys(req.files).length === 0) {
       return res.status(400).json({ error: 'No files were uploaded.' });
