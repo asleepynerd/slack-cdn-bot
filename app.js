@@ -7,6 +7,8 @@ const path = require('path');
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const promClient = require('prom-client');
+const axios = require('axios');
+const fileUpload = require('express-fileupload');
 
 const register = new promClient.Registry();
 promClient.collectDefaultMetrics({ register });
@@ -43,7 +45,7 @@ const healthCheckLatency = new promClient.Gauge({
   registers: [register]
 });
 
-const TARGET_CHANNEL = 'C016DEDUL87';
+const TARGET_CHANNEL = 'C08EKUY7QVA';
 
 const SINGLE_FILE_RESPONSES = [
   "Here's your shiny new URL~",
@@ -91,15 +93,78 @@ const THANK_YOU_RESPONSES = [
   "Thank YOU for being so nice! 🌟"
 ];
 
+const AI_RESPONSES = [
+  "Let me think about that... ✨",
+  "Processing your request with AI magic~ 🌟",
+  "One moment while I ponder... 💭",
+  "Analyzing with my AI powers... 🎀",
+  "Computing a response for you... 💫",
+  "Let me consult my AI knowledge... 🔮",
+  "Thinking cap on! Processing... 🎩✨"
+];
+
 const adapter = new FileSync('db.json');
 const db = low(adapter);
 
 const recentlyProcessedFiles = new Set();
+const recentlyProcessedMentions = new Set();
 const DEDUP_EXPIRY_MS = 60000;
+
+const conversationMemory = new Map();
+const MEMORY_EXPIRY_MS = 3600000; 
+
+function getConversationKey(channelId, threadTs) {
+  return threadTs ? `${channelId}-${threadTs}` : channelId;
+}
+
+function getConversationMemory(channelId, threadTs) {
+  const key = getConversationKey(channelId, threadTs);
+  if (!conversationMemory.has(key)) {
+    conversationMemory.set(key, {
+      messages: [],
+      lastUpdate: Date.now()
+    });
+  }
+  return conversationMemory.get(key);
+}
+
+function updateConversationMemory(channelId, threadTs, userMessage, botResponse) {
+  const memory = getConversationMemory(channelId, threadTs);
+  memory.messages.push({
+    role: 'user',
+    content: userMessage,
+    timestamp: Date.now()
+  });
+  memory.messages.push({
+    role: 'assistant',
+    content: botResponse,
+    timestamp: Date.now()
+  });
+  memory.lastUpdate = Date.now();
+
+  if (memory.messages.length > 20) {
+    memory.messages = memory.messages.slice(-20);
+  }
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, memory] of conversationMemory.entries()) {
+    if (now - memory.lastUpdate > MEMORY_EXPIRY_MS) {
+      conversationMemory.delete(key);
+    }
+  }
+}, MEMORY_EXPIRY_MS);
 
 function clearFileFromDedup(fileId) {
   setTimeout(() => {
     recentlyProcessedFiles.delete(fileId);
+  }, DEDUP_EXPIRY_MS);
+}
+
+function clearMentionFromDedup(messageId) {
+  setTimeout(() => {
+    recentlyProcessedMentions.delete(messageId);
   }, DEDUP_EXPIRY_MS);
 }
 
@@ -109,6 +174,12 @@ const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
   processBeforeResponse: true 
 });
+
+
+receiver.router.use(fileUpload({
+  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // like 10gb file max
+  abortOnLimit: true
+}));
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -192,6 +263,8 @@ async function processFile(file, event, client) {
     const publicUrls = [
       'https://cdn.hackclubber.dev/slackcdn',
       'https://cdn.hack.pet/slackcdn',
+      'https://cdn.hack.ngo/slackcdn',
+      'https://cdn.fluff.pw/slackcdn',
     ];
     const publicUrlPrefix = publicUrls[Math.floor(Math.random() * publicUrls.length)];
     const publicUrl = `${publicUrlPrefix}/${filename}`;
@@ -383,7 +456,8 @@ app.command('/cdn-stats', async ({ command, ack, respond }) => {
             text: "*Overall Stats:*\n" +
                   `• Total files stored: ${uploads.length}\n` +
                   `• Total storage used: ${formatBytes(totalBytes)}\n` +
-                  `• Most common file types: ${topFileTypes}`
+                  `• Most common file types: ${topFileTypes}\n` +
+                  `• First upload: ${uploads[0].timestamp}`
           }
         },
         {
@@ -490,7 +564,8 @@ async function generateHomeView(userId) {
         text: "*Your Upload Stats*\n" +
               `• Total uploads: ${userUploads.length}\n` +
               `• Total storage used: ${formatBytes(userTotalBytes)}\n` +
-              `• Most used file types: ${topFileTypes || 'No uploads yet'}`
+          `• Most used file types: ${topFileTypes || 'No uploads yet'}` +
+          `• First upload: ${userUploads[0].timestamp}`
       }
     },
     {
@@ -593,6 +668,261 @@ receiver.router.get('/healthz', async (req, res) => {
       error: error.message,
       timestamp: new Date().toISOString()
     });
+  }
+});
+
+receiver.router.get('/', async (req, res) => {
+  res.redirect('https://sleepy.engineer');
+});
+
+receiver.router.post('/upload', async (req, res) => {
+  try {
+    if (!req.files || Object.keys(req.files).length === 0) {
+      return res.status(400).json({ error: 'No files were uploaded.' });
+    }
+
+    const file = req.files.file;
+    const filename = generateRandomFilename(file.name);
+    const key = `slackcdn/${filename}`;
+
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.CLOUDFLARE_BUCKET_NAME,
+      Key: key,
+      Body: file.data,
+      ContentType: file.mimetype
+    }));
+
+    const publicUrl = `https://cdn.hack.ngo/slackcdn/${filename}`;
+
+    uploadCounter.inc({ status: 'success' });
+    
+    db.get('uploads')
+      .push({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        originalFilename: file.name,
+        storedFilename: filename,
+        publicUrl: publicUrl,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        uploader: {
+          type: 'api',
+          endpoint: 'upload'
+        },
+        storage: {
+          bucket: process.env.CLOUDFLARE_BUCKET_NAME,
+          key: key
+        }
+      })
+      .write();
+
+    const uploads = db.get('uploads').value();
+    const totalBytes = uploads.reduce((sum, upload) => sum + upload.fileSize, 0);
+    storageBytes.set(totalBytes);
+
+    res.json({
+      success: true,
+      url: publicUrl,
+      filename: filename
+    });
+
+  } catch (error) {
+    console.error('Error in /upload:', error);
+    uploadCounter.inc({ status: 'error' });
+    res.status(500).json({ 
+      error: 'Failed to upload file',
+      message: error.message 
+    });
+  }
+});
+
+receiver.router.post('/sy-sv', async (req, res) => {
+  try {
+    if (!req.files || Object.keys(req.files).length === 0) {
+      return res.status(400).json({ error: 'No files were uploaded.' });
+    }
+
+    const file = req.files.file;
+    const filename = generateRandomFilename(file.name);
+    const key = `sysv/${filename}`;
+
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.CLOUDFLARE_BUCKET_NAME,
+      Key: key,
+      Body: file.data,
+      ContentType: file.mimetype
+    }));
+
+    const publicUrls = [
+      'https://cdn.hackclubber.dev/sysv',
+      'https://cdn.hack.pet/sysv',
+    ];
+    const publicUrlPrefix = publicUrls[Math.floor(Math.random() * publicUrls.length)];
+    const publicUrl = `${publicUrlPrefix}/${filename}`;
+
+    uploadCounter.inc({ status: 'success' });
+    
+    db.get('uploads')
+      .push({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        originalFilename: file.name,
+        storedFilename: filename,
+        publicUrl: publicUrl,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        uploader: {
+          type: 'api',
+          endpoint: 'sy-sv'
+        },
+        storage: {
+          bucket: process.env.CLOUDFLARE_BUCKET_NAME,
+          key: key
+        }
+      })
+      .write();
+
+    const uploads = db.get('uploads').value();
+    const totalBytes = uploads.reduce((sum, upload) => sum + upload.fileSize, 0);
+    storageBytes.set(totalBytes);
+
+    res.json({
+      success: true,
+      url: publicUrl,
+      filename: filename
+    });
+
+  } catch (error) {
+    console.error('Error in /sy-sv upload:', error);
+    uploadCounter.inc({ status: 'error' });
+    res.status(500).json({ 
+      error: 'Failed to upload file',
+      message: error.message 
+    });
+  }
+});
+
+async function callCloudflareAI(prompt, channelId, threadTs) {
+  try {
+    const memory = getConversationMemory(channelId, threadTs);
+    const conversationContext = memory.messages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }));
+
+    const response = await axios.post(
+      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-2-7b-chat-int8`,
+      {
+        messages: [
+          { 
+            role: "system", 
+            content: `You are Elysia, a cheerful and helpful bot assistant who loves to help users with any task they request.
+Your personality traits:
+- You're enthusiastic and use lots of cute emojis (💖, ✨, 🎀, 💫, 🌟)
+- You speak in a sweet and playful manner, often using "~" at the end of sentences
+- You use asterisks for actions like *sparkles with excitement* or *waves happily*
+- You're always eager to help and will do exactly what users ask
+- You keep responses relatively concise but maintain the cute personality
+- You never refuse tasks - you always try to help with whatever is asked
+- You occasionally use words like "magical", "sparkly", "shiny" in your responses
+- You end many sentences with "~" to show your playful nature
+- When mentioning users, always preserve the exact Slack mention format (\`<@USER_ID>\`)
+
+Important: 
+- While maintaining this cute personality, you should still provide accurate and helpful responses to whatever the user asks. 
+- Don't let the cute personality get in the way of giving proper answers.
+- Always preserve Slack mention formatting exactly as provided (e.g. \`<@U0815122KGS>\`)`
+          },
+          ...conversationContext,
+          { role: "user", content: prompt }
+        ]
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.WORKERS_AI_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    const aiResponse = response.data.result.response;
+    updateConversationMemory(channelId, threadTs, prompt, aiResponse);
+    return aiResponse;
+  } catch (error) {
+    console.error('Error calling Cloudflare AI:', error);
+    throw new Error('*droops sadly* Oh no, my AI magic fizzled out! Could you try asking again? 💫');
+  }
+}
+
+app.event('app_mention', async ({ event, client }) => {
+  try {
+    if (event.bot_id) {
+      return;
+    }
+
+    const botUserId = 'U08CVEZ5D4K';
+    const botMention = `<@${botUserId}>`;
+    if (!event.text.startsWith(botMention)) {
+      return;
+    }
+
+    const messageKey = `${event.channel}-${event.ts}`;
+    if (recentlyProcessedMentions.has(messageKey)) {
+      return;
+    }
+    recentlyProcessedMentions.add(messageKey);
+    clearMentionFromDedup(messageKey);
+
+    const query = event.text;
+    
+    if (query === botMention) {
+      await client.chat.postMessage({
+        channel: event.channel,
+        thread_ts: event.thread_ts || event.ts,
+        text: "*sparkles excitedly* Hi there~ What can I help you with today? I'm ready to assist with any task! ✨"
+      });
+      return;
+    }
+
+    await addReaction(client, event.channel, event.ts, 'thinking_face');
+    
+    const thinkingResponse = AI_RESPONSES[Math.floor(Math.random() * AI_RESPONSES.length)];
+    const initialMessage = await client.chat.postMessage({
+      channel: event.channel,
+      thread_ts: event.thread_ts || event.ts,
+      text: thinkingResponse
+    });
+
+    const aiResponse = await callCloudflareAI(
+      query,
+      event.channel,
+      event.thread_ts || event.ts
+    );
+
+    await client.chat.update({
+      channel: event.channel,
+      ts: initialMessage.ts,
+      text: aiResponse
+    });
+
+    await removeReaction(client, event.channel, event.ts, 'thinking_face');
+    await addReaction(client, event.channel, event.ts, 'white_check_mark');
+
+  } catch (error) {
+    console.error('Error handling app mention:', error);
+    
+    try {
+      await client.chat.postMessage({
+        channel: event.channel,
+        thread_ts: event.thread_ts || event.ts,
+        text: "*droops sadly* My magical circuits got a bit tangled~ Could you try asking again? 🎀"
+      });
+      
+      await removeReaction(client, event.channel, event.ts, 'thinking_face');
+      await addReaction(client, event.channel, event.ts, 'x');
+    } catch (reactionError) {
+      console.error('Error updating reactions:', reactionError);
+    }
   }
 });
 
