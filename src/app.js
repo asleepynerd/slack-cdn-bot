@@ -1,5 +1,7 @@
 require('dotenv').config();
+const express = require('express');
 const fileUpload = require('express-fileupload');
+const path = require('path');
 const { app, receiver, TARGET_CHANNEL } = require('./services/slack');
 const { handleFileUpload } = require('./handlers/fileHandler');
 const { handleMention, handleThankYou } = require('./handlers/mentionHandler');
@@ -8,14 +10,18 @@ const { handleCdnStats } = require('./handlers/statsHandler');
 const apiRoutes = require('./routes/api');
 const metricsRoutes = require('./routes/metrics');
 
+// Configure express middleware
+receiver.router.use(express.static(path.join(__dirname, '..', 'public')));
 receiver.router.use(fileUpload({
-  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, 
+  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB file max
   abortOnLimit: true
 }));
 
+// Configure routes
 receiver.router.use('/', apiRoutes);
 receiver.router.use('/', metricsRoutes);
 
+// Configure Slack event handlers
 app.message(async ({ message, client }) => {
   if (message.channel !== TARGET_CHANNEL) {
     return;
@@ -50,6 +56,7 @@ app.command('/cdn-stats', async ({ command, ack, respond }) => {
   await respond(response);
 });
 
+// Start the app
 (async () => {
   const port = process.env.PORT || 3000;
   await app.start(port);

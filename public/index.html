@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>✨ Magical File Uploader ✨</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#FF69B4',
+                        secondary: '#9370DB',
+                        success: '#98FB98',
+                        background: '#FFF0F5'
+                    },
+                    animation: {
+                        'float': 'float 3s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-slow': 'bounce 2s infinite'
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background min-h-full flex flex-col">
+    <div class="max-w-4xl mx-auto px-4 py-8 flex-1 w-full">
+        <div id="upload-container" class="bg-white rounded-3xl shadow-2xl p-8 transition-all duration-300">
+            <div class="text-center mb-8">
+                <h1 class="text-4xl font-bold text-primary mb-2 animate-float">✨ Magical File Uploader ✨</h1>
+                <p class="text-secondary text-lg">Drop your files here or click to upload~</p>
+            </div>
+
+            <div id="dropZone" class="border-4 border-dashed border-primary/30 rounded-2xl p-8 mb-8 transition-all duration-300 min-h-[300px] flex items-center justify-center group hover:border-primary/50 hover:bg-primary/5">
+                <div class="upload-prompt text-center">
+                    <i class="fas fa-cloud-upload-alt text-6xl text-primary mb-4 group-hover:scale-110 transition-transform duration-300"></i>
+                    <p class="text-lg text-gray-600 mb-2">Drag & Drop files here</p>
+                    <p class="text-gray-400 mb-4">or</p>
+                    <label class="bg-primary hover:bg-secondary text-white px-6 py-3 rounded-full cursor-pointer transition-all duration-300 hover:shadow-lg hover:-translate-y-1 inline-block">
+                        Choose Files
+                        <input type="file" id="fileInput" multiple class="hidden">
+                    </label>
+                </div>
+
+                <div class="upload-progress hidden">
+                    <div class="relative h-32 mb-8">
+                        <div class="rocket absolute left-1/2 -translate-x-1/2 bottom-0 text-5xl text-primary animate-bounce-slow">
+                            <i class="fas fa-rocket"></i>
+                        </div>
+                        <div class="smoke space-y-2 absolute left-1/2 -translate-x-1/2 bottom-0">
+                            <div class="w-2 h-2 bg-primary/20 rounded-full animate-pulse-slow"></div>
+                            <div class="w-2 h-2 bg-primary/20 rounded-full animate-pulse-slow delay-100"></div>
+                            <div class="w-2 h-2 bg-primary/20 rounded-full animate-pulse-slow delay-200"></div>
+                        </div>
+                    </div>
+                    <div class="progress-text text-lg text-secondary mb-4">Preparing for launch...</div>
+                    <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div class="progress-fill h-full bg-primary transition-all duration-300 w-0"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="upload-list space-y-4"></div>
+        </div>
+
+        <div class="completed-container hidden mt-8 text-center">
+            <h2 class="text-3xl font-bold text-primary mb-8 animate-float">✨ Upload Complete! ✨</h2>
+            <div class="completed-list space-y-4 mb-8"></div>
+            <button onclick="resetUploader()" class="bg-secondary hover:bg-secondary/80 text-white px-6 py-3 rounded-full transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
+                <i class="fas fa-redo mr-2"></i> Upload More Files
+            </button>
+        </div>
+    </div>
+
+    <footer class="text-center py-6 text-gray-600">
+        <p>Powered by <a href="https://sleepy.engineer" target="_blank" class="text-primary hover:text-secondary transition-colors duration-300">sleepy.engineer</a> ✨</p>
+    </footer>
+
+    <script src="/js/upload.js"></script>
+</body>
+</html> 
