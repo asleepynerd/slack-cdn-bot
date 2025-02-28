@@ -10,13 +10,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const completedList = document.querySelector('.completed-list');
     const uploadContainer = document.getElementById('upload-container');
 
-    // Prevent default drag behaviors
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         dropZone.addEventListener(eventName, preventDefaults, false);
         document.body.addEventListener(eventName, preventDefaults, false);
     });
 
-    // Highlight drop zone when dragging over it
     ['dragenter', 'dragover'].forEach(eventName => {
         dropZone.addEventListener(eventName, highlight, false);
     });
@@ -25,7 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
         dropZone.addEventListener(eventName, unhighlight, false);
     });
 
-    // Handle dropped files
     dropZone.addEventListener('drop', handleDrop, false);
     fileInput.addEventListener('change', handleFiles, false);
 

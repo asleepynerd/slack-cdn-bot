@@ -1,7 +1,11 @@
 const promClient = require('prom-client');
 
 const register = new promClient.Registry();
-promClient.collectDefaultMetrics({ register });
+
+// disable metrics when bun is used because fucking bun hates the loop thing
+if (!process.versions.bun) {
+    promClient.collectDefaultMetrics({ register });
+}
 
 const uploadLatency = new promClient.Histogram({
   name: 'cdn_upload_duration_seconds',
