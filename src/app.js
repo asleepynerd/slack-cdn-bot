@@ -7,6 +7,7 @@ const { handleFileUpload } = require('./handlers/fileHandler');
 const { handleMention, handleThankYou } = require('./handlers/mentionHandler');
 const { handleHomeOpened, generateHomeView } = require('./handlers/homeHandler');
 const { handleCdnStats } = require('./handlers/statsHandler');
+const { isMetaChannelMessage, addVoteButtonsToMessage, handleVoteAction } = require('./handlers/metaVoteHandler');
 const apiRoutes = require('./routes/api');
 const metricsRoutes = require('./routes/metrics');
 
@@ -35,6 +36,12 @@ try {
      * @param {*} client - The Slack client
      */
     try {
+      // Handle Meta channel messages for anonymous voting
+      if (isMetaChannelMessage(message)) {
+        await addVoteButtonsToMessage(message, client);
+        return;
+      }
+
       if (message.channel !== TARGET_CHANNEL) {
         return;
       }
@@ -54,6 +61,25 @@ try {
       }
     } catch (error) {
       console.error('Error handling Slack message:', error);
+    }
+  });
+
+  // Handle vote button actions
+  app.action('upvote_action', async ({ body, ack, client }) => {
+    try {
+      await ack();
+      await handleVoteAction(body, client);
+    } catch (error) {
+      console.error('Error handling upvote action:', error);
+    }
+  });
+
+  app.action('downvote_action', async ({ body, ack, client }) => {
+    try {
+      await ack();
+      await handleVoteAction(body, client);
+    } catch (error) {
+      console.error('Error handling downvote action:', error);
     }
   });
 
