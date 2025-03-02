@@ -1,12 +1,29 @@
 const crypto = require('crypto');
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
+const fs = require('fs');
 
-const adapter = new FileSync('votes.json');
-const voteDb = low(adapter);
+const voteStorage = {
+  votes: {}
+};
 
-// Initialize votes database with default structure
-voteDb.defaults({ votes: {} }).write();
+const VOTES_FILE_PATH = 'votes.json';
+
+try {
+  if (fs.existsSync(VOTES_FILE_PATH)) {
+    const data = fs.readFileSync(VOTES_FILE_PATH, 'utf8');
+    const parsed = JSON.parse(data);
+    voteStorage.votes = parsed.votes || {};
+  }
+} catch (error) {
+  console.error('Error loading votes file:', error);
+}
+
+function saveVotes() {
+  try {
+    fs.writeFileSync(VOTES_FILE_PATH, JSON.stringify(voteStorage, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error saving votes file:', error);
+  }
+}
 
 /**
  * Hash the user ID to ensure anonymity
@@ -17,7 +34,7 @@ voteDb.defaults({ votes: {} }).write();
 function hashUserId(userId, messageId) {
   return crypto
     .createHash('sha256')
-    .update(`${userId}-${messageId}-${process.env.VOTE_SECRET || 'anonymous-voting-salt'}`)
+    .update(`${userId}-${messageId}-${process.env.VOTE_SECRET || '§1234567890-0987654321§1234567890-0987654321§'}`)
     .digest('hex');
 }
 
@@ -25,56 +42,59 @@ function hashUserId(userId, messageId) {
  * Record a vote for a message
  * @param {string} messageId - The message ID (channel-timestamp)
  * @param {string} userId - The user's ID
- * @param {string} voteType - Either 'upvote' or 'downvote'
+ * @param {string|null} voteType - Either 'upvote', 'downvote', or null to remove vote
+ * @param {string} [value] - Optional value for system flags
  * @returns {object} - Updated vote counts
  */
-function recordVote(messageId, userId, voteType) {
-  // Initialize message entry if it doesn't exist
-  if (!voteDb.get('votes').has(messageId).value()) {
-    voteDb.get('votes')
-      .set(messageId, { 
-        upvotes: 0, 
-        downvotes: 0, 
-        voters: {} 
-      })
-      .write();
-  }
-
-  const hashedUserId = hashUserId(userId, messageId);
-  const messageVotes = voteDb.get(`votes.${messageId}`).value();
-  const previousVote = messageVotes.voters[hashedUserId];
-
-  // If user already voted the same way, do nothing
-  if (previousVote === voteType) {
-    return {
-      upvotes: messageVotes.upvotes,
-      downvotes: messageVotes.downvotes
+function recordVote(messageId, userId, voteType, value) {
+  if (!voteStorage.votes[messageId]) {
+    voteStorage.votes[messageId] = {
+      upvotes: 0,
+      downvotes: 0,
+      voters: {},
+      processed: false,
+      reply_ts: null
     };
   }
 
-  // Remove previous vote if it exists
-  if (previousVote) {
-    voteDb.get(`votes.${messageId}.${previousVote}s`)
-      .update(n => n - 1)
-      .write();
+  if (voteType === 'processed') {
+    voteStorage.votes[messageId].processed = true;
+    saveVotes();
+    return getVoteCounts(messageId);
+  }
+  
+  if (voteType === 'reply_ts') {
+    voteStorage.votes[messageId].reply_ts = value;
+    saveVotes();
+    return getVoteCounts(messageId);
   }
 
-  // Add new vote
-  voteDb.get(`votes.${messageId}.${voteType}s`)
-    .update(n => n + 1)
-    .write();
+  const hashedUserId = hashUserId(userId, messageId);
+  const previousVote = voteStorage.votes[messageId].voters[hashedUserId];
 
-  // Record user's vote type
-  voteDb.get(`votes.${messageId}.voters`)
-    .set(hashedUserId, voteType)
-    .write();
+  if (previousVote === voteType && voteType !== null) {
+    return voteStorage.votes[messageId];
+  }
 
-  // Return updated counts
-  const updatedVotes = voteDb.get(`votes.${messageId}`).value();
-  return {
-    upvotes: updatedVotes.upvotes,
-    downvotes: updatedVotes.downvotes
-  };
+  if (previousVote === 'upvote') {
+    voteStorage.votes[messageId].upvotes--;
+  } else if (previousVote === 'downvote') {
+    voteStorage.votes[messageId].downvotes--;
+  }
+
+  if (voteType === 'upvote') {
+    voteStorage.votes[messageId].upvotes++;
+    voteStorage.votes[messageId].voters[hashedUserId] = voteType;
+  } else if (voteType === 'downvote') {
+    voteStorage.votes[messageId].downvotes++;
+    voteStorage.votes[messageId].voters[hashedUserId] = voteType;
+  } else if (voteType === null) {
+    delete voteStorage.votes[messageId].voters[hashedUserId];
+  }
+
+  saveVotes();
+
+  return voteStorage.votes[messageId];
 }
 
 /**
@@ -83,15 +103,20 @@ function recordVote(messageId, userId, voteType) {
  * @returns {object} - Vote counts
  */
 function getVoteCounts(messageId) {
-  const messageVotes = voteDb.get(`votes.${messageId}`).value();
-  
-  if (!messageVotes) {
-    return { upvotes: 0, downvotes: 0 };
+  if (!voteStorage.votes[messageId]) {
+    return { 
+      upvotes: 0, 
+      downvotes: 0,
+      processed: false,
+      reply_ts: null
+    };
   }
   
   return {
-    upvotes: messageVotes.upvotes,
-    downvotes: messageVotes.downvotes
+    upvotes: voteStorage.votes[messageId].upvotes || 0,
+    downvotes: voteStorage.votes[messageId].downvotes || 0,
+    processed: voteStorage.votes[messageId].processed || false,
+    reply_ts: voteStorage.votes[messageId].reply_ts || null
   };
 }
 
@@ -102,14 +127,12 @@ function getVoteCounts(messageId) {
  * @returns {string|null} - The vote type or null if no vote
  */
 function getUserVote(messageId, userId) {
-  const messageVotes = voteDb.get(`votes.${messageId}`).value();
-  
-  if (!messageVotes) {
+  if (!voteStorage.votes[messageId] || !voteStorage.votes[messageId].voters) {
     return null;
   }
   
   const hashedUserId = hashUserId(userId, messageId);
-  return messageVotes.voters[hashedUserId] || null;
+  return voteStorage.votes[messageId].voters[hashedUserId] || null;
 }
 
 module.exports = {

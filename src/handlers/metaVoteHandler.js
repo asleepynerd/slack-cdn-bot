@@ -1,8 +1,8 @@
 const { recordVote, getVoteCounts, getUserVote } = require('../services/voteService');
-const { sendMessage, updateMessage } = require('../services/slack');
 
-// Meta channel ID
+
 const META_CHANNEL_ID = 'C0188CY57PZ';
+//const META_CHANNEL_ID = 'C08F7GZU1Q9';
 
 /**
  * Generate the vote buttons block
@@ -67,40 +67,39 @@ function generateVoteCountDisplay(voteCounts) {
  */
 async function addVoteButtonsToMessage(message, client) {
   try {
-    // Skip messages that already have vote buttons
-    if (message.blocks && message.blocks.some(block => block.block_id === "vote_buttons")) {
+
+    if (message.thread_ts) {
+      return;
+    }
+
+    if (message.subtype) {
       return;
     }
     
-    // Skip bot messages and messages with subtypes (like thread_broadcast)
-    if (message.bot_id || message.subtype) {
-      return;
-    }
-    
-    // Get initial vote counts (should be 0 for new messages)
     const messageId = `${message.channel}-${message.ts}`;
-    const voteCounts = getVoteCounts(messageId);
     
-    // Create blocks for the message
+    const voteCounts = getVoteCounts(messageId);
+    if (voteCounts.processed) {
+      return;
+    }
+    
+    
     const blocks = [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: message.text
-        }
-      },
       generateVoteCountDisplay(voteCounts),
       generateVoteButtons(voteCounts)
     ];
     
-    // Update the message with vote buttons
-    await updateMessage(client, {
+    const reply = await client.chat.postMessage({
       channel: message.channel,
-      ts: message.ts,
+      thread_ts: message.ts,
       blocks: blocks,
-      text: message.text // Fallback text
+      text: "Vote on this message"
     });
+    
+    
+    recordVote(messageId, 'SYSTEM', 'processed');
+    recordVote(messageId, 'SYSTEM', 'reply_ts', reply.ts);
+    
   } catch (error) {
     console.error('Error adding vote buttons:', error);
   }
@@ -115,53 +114,48 @@ async function handleVoteAction(body, client) {
   try {
     const { user, actions, container, message } = body;
     const action = actions[0];
-    const messageId = `${container.channel_id}-${container.message_ts}`;
+    
+    const messageId = `${container.channel_id}-${message.thread_ts}`;
     const voteType = action.action_id === "upvote_action" ? "upvote" : "downvote";
     
-    // Get previous vote to check if user is changing their vote
     const previousVote = getUserVote(messageId, user.id);
     
-    // Record the vote
-    const updatedCounts = recordVote(messageId, user.id, voteType);
-    
-    // Update the message with new vote counts
-    const updatedBlocks = message.blocks.map(block => {
-      if (block.block_id === "vote_buttons") {
-        return generateVoteButtons(updatedCounts);
-      } else if (block.block_id === "vote_stats") {
-        return generateVoteCountDisplay(updatedCounts);
-      }
-      return block;
-    });
-    
-    await updateMessage(client, {
-      channel: container.channel_id,
-      ts: container.message_ts,
-      blocks: updatedBlocks,
-      text: message.text // Fallback text
-    });
-    
-    // Send ephemeral confirmation to the user
-    let confirmationText;
     if (previousVote === voteType) {
-      confirmationText = `You've already ${voteType}d this message. Your vote remains unchanged.`;
-    } else if (previousVote) {
-      confirmationText = `Your vote has been changed from ${previousVote} to ${voteType}. This action is anonymous.`;
-    } else {
-      confirmationText = `Your ${voteType} has been recorded anonymously.`;
+      const updatedCounts = recordVote(messageId, user.id, null);
+      
+      const updatedBlocks = [
+        generateVoteCountDisplay(updatedCounts),
+        generateVoteButtons(updatedCounts)
+      ];
+      
+      await client.chat.update({
+        channel: container.channel_id,
+        ts: message.ts,
+        blocks: updatedBlocks,
+        text: "Vote on this message"
+      });
+      
+      return;
     }
     
-    // Send ephemeral confirmation message
-    await client.chat.postEphemeral({
+    const updatedCounts = recordVote(messageId, user.id, voteType);
+    
+    const updatedBlocks = [
+      generateVoteCountDisplay(updatedCounts),
+      generateVoteButtons(updatedCounts)
+    ];
+    
+    await client.chat.update({
       channel: container.channel_id,
-      user: user.id,
-      text: confirmationText
+      ts: message.ts,
+      blocks: updatedBlocks,
+      text: "Vote on this message"
     });
+    
     
   } catch (error) {
     console.error('Error handling vote action:', error);
     
-    // Send error message to user
     try {
       await client.chat.postEphemeral({
         channel: body.container.channel_id,

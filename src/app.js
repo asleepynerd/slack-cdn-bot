@@ -36,8 +36,8 @@ try {
      * @param {*} client - The Slack client
      */
     try {
-      // Handle Meta channel messages for anonymous voting
       if (isMetaChannelMessage(message)) {
+        console.log('Adding vote buttons to message');
         await addVoteButtonsToMessage(message, client);
         return;
       }
@@ -64,7 +64,6 @@ try {
     }
   });
 
-  // Handle vote button actions
   app.action('upvote_action', async ({ body, ack, client }) => {
     try {
       await ack();

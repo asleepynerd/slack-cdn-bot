@@ -1,3 +1,13 @@
 {
-  "votes": {}
+  "votes": {
+    "C0188CY57PZ-1740900312.699929": {
+      "upvotes": 1,
+      "downvotes": 0,
+      "voters": {
+        "329cf26d0b3d39671dfadb5560cd043e5b7939ee55e122d1711fd6b19744d327": "upvote"
+      },
+      "processed": true,
+      "reply_ts": "1740900314.969769"
+    }
+  }
 }

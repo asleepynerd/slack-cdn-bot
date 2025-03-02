@@ -4,3 +4,4 @@ db.json
 package-lock.json
 yarn.lock
 bun.lock
+votes.json
